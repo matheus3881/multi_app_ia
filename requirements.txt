@@ -1,0 +1,28 @@
+# requirements.txt
+
+# --- Framework de Interface ---
+streamlit
+
+# --- Processamento de Documentos e Imagens ---
+PyMuPDF
+Pillow
+opencv-python
+numpy
+
+# --- Machine Learning e Embeddings ---
+sentence-transformers
+faiss-cpu
+torch 
+sentencepiece
+
+
+# --- Conexão com Banco de Dados ---
+pyodbc
+
+# --- Ecossistema LangChain ---
+langchain-core
+langchain-text-splitters
+langchain-ollama
+
+# --- Biblioteca para modelos do Hugging Face ---
+transformers
