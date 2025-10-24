@@ -99,9 +99,11 @@ def processar_arquivo(arquivo_bytes, nome):
 def processar_pdf(pdf_bytes):
     """Converte cada página de um PDF para uma imagem PIL de alta resolução."""
     imagens = []
+    # CORREÇÃO: Usar dpi=200 para UI e dpi=300 para OCR. 
+    # O app.py usa 200, então o pipeline de OCR deve usar 300.
     with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:
         for pagina in doc:
-            pix = pagina.get_pixmap(dpi=300)
+            pix = pagina.get_pixmap(dpi=300) # 300 DPI para melhor OCR
             img = Image.open(io.BytesIO(pix.tobytes("png")))
             imagens.append(img)
     return imagens
@@ -116,7 +118,7 @@ def realizar_ocr(imagens: list):
         img_cv = np.array(img)
 
         # Usa Output.DICT para obter um dicionário
-        data = pytesseract.image_to_data(img_cv, output_type=Output.DICT)
+        data = pytesseract.image_to_data(img_cv, lang='por', output_type=Output.DICT) # lang='por'
 
         n_boxes = len(data['text'])
 
@@ -168,7 +170,8 @@ def realizar_ocr(imagens: list):
             doc = Document(
                 page_content=texto_da_linha,
                 metadata={
-                    "source": f"Página {chave_linha[0]}",
+                    "source": f"Página {chave_linha[0]}", # Chave: "Página N"
+                    "page": chave_linha[0] - 1, # Chave: índice 0
                     "bbox": bbox_linha
                 }
             )
@@ -214,7 +217,7 @@ def criar_faiss(chunks: list[Document]):
 def configurar_llm():
     """Configura e retorna a cadeia LangChain com o LLM."""
     
-    model = "gemma3:4b"
+    model = "gemma3:4b" # gemma3:4b não existe, gemma:2b ou gemma:7b
     llm = ChatOllama(model=model, temperature=0)
     prompt_template = """
         Você é um assistente preciso para extrair informações de documentos.
@@ -255,36 +258,30 @@ def buscar_resposta(index, documentos, query_llm, chain):
     'query_llm' é a instrução completa para o LLM.
     """
     
-    # --- INÍCIO DA CORREÇÃO ---
-    # 1. Criamos uma "Query de Busca" otimizada para o FAISS.
-    #    Ela foca nos TERMOS e CONCEITOS, não nas instruções.
     query_busca_faiss = "Nome da empresa, registro comercial, NIRE, nomes de pessoas, sócios, CPF, endereço da sede, número de protocolo, data do documento"
     
     print(f"\n--- DEBUG: Query Original (LLM): {query_llm}")
     print(f"--- DEBUG: Query Otimizada (FAISS): {query_busca_faiss}")
     
-    # 2. Usamos a query_busca_faiss para gerar o embedding da busca
     embedder_model = carregar_modelo_embedding()
     query_embedding = embedder_model.encode(
         [query_busca_faiss], convert_to_numpy=True).astype("float32")
-    # --- FIM DA CORREÇÃO ---
 
     faiss.normalize_L2(query_embedding)
 
-    D, I = index.search(query_embedding, 5) # Tentamos buscar 5 chunks
+    k = min(5, len(documentos)) # Garante que k não seja maior que o nro de docs
+    D, I = index.search(query_embedding, k) 
 
     retrieved_docs_obj = [documentos[i] for i in I[0] if i < len(documentos)]
 
     if not retrieved_docs_obj:
         return {"resposta": "Nenhuma informação relevante encontrada.", "fontes": [], "documentos_fonte": [], "bboxes": []}
 
-    # --- DEBUG: Vamos ver os documentos que essa nova query encontrou ---
     print("\n--- DEBUG: Documentos Recuperados (Pós-Correção) ---")
     for i, doc in enumerate(retrieved_docs_obj):
         print(f"--- Doc {i} (Fonte: {doc.metadata.get('source')}) ---")
         print(f"Conteúdo: {doc.page_content[:150]}...")
     print("--------------------------------------------------")
-    # --- FIM DEBUG ---
 
     fontes = {doc.metadata.get("source", "Desconhecida")
               for doc in retrieved_docs_obj}
@@ -294,7 +291,6 @@ def buscar_resposta(index, documentos, query_llm, chain):
     print(context_text)
     print("------------------------------------")
 
-    # 3. Usamos a query_llm (a original, longa) para o LLM
     resposta_llm = chain.invoke({"context": context_text, "question": query_llm})
 
     bboxes_relevantes = []
@@ -309,113 +305,201 @@ def buscar_resposta(index, documentos, query_llm, chain):
         
         if any(palavra in chunk_texto for palavra in palavras_relevantes):
             try:
-                page_num_str = re.search(r'\d+', doc.metadata["source"]).group(0)
-                bboxes_relevantes.append({
-                    "page": int(page_num_str) - 1, 
-                    "bbox": doc.metadata["bbox"]
-                })
+                # Fluxo OCR: Adiciona BBox se existir
+                if "bbox" in doc.metadata and "page" in doc.metadata:
+                    bboxes_relevantes.append({
+                        "page": int(doc.metadata["page"]), # Usa o índice 0
+                        "bbox": doc.metadata["bbox"]
+                    })
             except Exception as e:
                 print(f"AVISO: Falha ao extrair bbox/página do metadata: {doc.metadata}. Erro: {e}")
 
-    # Converte 'documentos_fonte' (objetos) para dicts (serializável)
-    documentos_fonte_serializaveis = []
-    for doc in retrieved_docs_obj:
-        documentos_fonte_serializaveis.append({
-            "page_content": doc.page_content,
-            "metadata": doc.metadata
-        })
-
+    # MODIFICADO: Retorna os objetos Document originais
+    # Isso é necessário para a função de realce de PDF puro (Problema 2)
+    # E não quebra a função de BBox
     resposta_llm_dict = {
         "resposta": resposta_llm,
         "fontes": sorted(list(fontes)),
-        "documentos_fonte": documentos_fonte_serializaveis, 
+        "documentos_fonte": retrieved_docs_obj, # Retorna os objetos
         "bboxes": bboxes_relevantes
     }
 
     return resposta_llm_dict
 
 # ==============================================================================
-# ETAPA 4: ORQUESTRADOR PRINCIPAL (AGORA SÍNCRONO)
+# ETAPA 4: ORQUESTRADOR PRINCIPAL (OCR)
 # ==============================================================================
 
 
 def fluxo_principal(arquivo_bytes: bytes, nome_arquivo: str):
     """
-    Orquestra todo o fluxo de forma síncrona, usando funções cacheadas.
+    (FLUXO OCR) Orquestra todo o fluxo de forma síncrona.
     """
-    # 1. Chama a função cacheada que faz todo o trabalho pesado
-    # A chamada agora é direta, sem asyncio.
     print("==============================================")
-    print("DEBUG: [fluxo_principal] INICIADO")
+    print("DEBUG: [fluxo_principal - OCR] INICIADO")
     print(f"DEBUG: Recebido arquivo: {nome_arquivo}, Tamanho: {len(arquivo_bytes)} bytes")
     
     try:
-        # 1. Tentar processar o documento
         print("DEBUG: [Etapa 1] Chamando processar_documento_cacheado...")
         index, chunks_final = processar_documento_cacheado(
             arquivo_bytes, nome_arquivo
         )
         print("DEBUG: [Etapa 1] processar_documento_cacheado CONCLUÍDO.")
 
-        # 2. Verificar o resultado do processamento
         if index is None:
-            print("DEBUG: [Etapa 1] FALHA. 'index' é None. Documento pode ser inválido ou vazio.")
+            print("DEBUG: [Etapa 1] FALHA. 'index' é None.")
             return {
                 "resposta": "Não foi possível extrair texto do documento. Verifique a qualidade da imagem ou do PDF.",
-                "fontes": [],
-                "documentos_fonte": []
+                "fontes": [], "documentos_fonte": [], "bboxes": []
             }
         
         print(f"DEBUG: [Etapa 1] SUCESSO. 'index' criado. Total de chunks: {len(chunks_final)}")
 
-        # 3. Preparar a busca
         query = "Extraia as informações do documento solicitadas no template, com base no contexto fornecido."
         print(f"DEBUG: [Etapa 2] Configurando LLM e chain...")
         chain = configurar_llm()
         print("DEBUG: [Etapa 2] CONCLUÍDO.")
 
-        # 4. Executar a busca
         print("DEBUG: [Etapa 3] Chamando buscar_resposta (LLM)...")
         resposta = buscar_resposta(index, chunks_final, query, chain)
         print("DEBUG: [Etapa 3] buscar_resposta CONCLUÍDO.")
 
-        # 5. Logar a resposta final (antes de retornar)
         print("----------------------------------------------")
-        print("DEBUG: [Resultado] RESPOSTA BRUTA DO BACKEND:")
-        print(resposta) # O print que você já tinha
+        print("DEBUG: [Resultado] RESPOSTA BRUTA DO BACKEND (OCR):")
+        # print(resposta) # Log muito grande, talvez logar só a resposta
+        print(resposta.get("resposta"))
         print("----------------------------------------------")
         
-        # 6. Verificação final
         if resposta is None:
             print("DEBUG: [Resultado] AVISO: 'buscar_resposta' retornou None.")
-            # Retorna um dicionário de erro claro em vez de None
             return {
                 "resposta": "Erro: A função de busca (LLM) não retornou nada (None).",
-                "fontes": [],
-                "documentos_fonte": []
+                "fontes": [], "documentos_fonte": [], "bboxes": []
             }
 
-        print("DEBUG: [fluxo_principal] RETORNANDO RESPOSTA COM SUCESSO.")
+        print("DEBUG: [fluxo_principal - OCR] RETORNANDO RESPOSTA COM SUCESSO.")
         print("==============================================")
         return resposta
 
     except Exception as e:
-        # Captura QUALQUER erro que aconteceu nas etapas acima
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print(f"DEBUG: [fluxo_principal] !!! EXCEÇÃO CAPTURADA !!!")
+        print(f"DEBUG: [fluxo_principal - OCR] !!! EXCEÇÃO CAPTURADA !!!")
         print(f"Erro: {e}")
-        traceback.print_exc() # Imprime o stack trace completo no console
+        traceback.print_exc()
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         
-        # Retorna um dicionário de erro claro para o frontend
         return {
             "resposta": f"Erro crítico no backend: {e}",
-            "fontes": [],
-            "documentos_fonte": []
+            "fontes": [], "documentos_fonte": [], "bboxes": []
         }
 
+# ==============================================================================
+# INÍCIO: NOVAS FUNÇÕES ADICIONADAS (PARA PDF PURO)
+# ==============================================================================
 
+@st.cache_data
+def processar_texto_puro_cacheado(pure_text_pages: list[str], file_name: str):
+    """
+    (NOVA E CORRIGIDA) "Mestra" do Texto Puro: Lista de Páginas -> Chunks -> Index
+    Reutiliza as funções 'dividir_em_chunks' e 'criar_faiss'.
+    """
+    print(f"\n--- EXECUTANDO PROCESSAMENTO DE TEXTO (CACHE MISS) PARA: {file_name} ---")
+    
+    # 1. Empacotar o texto (página por página) em objetos Document
+    # CORREÇÃO: Itera sobre a lista de páginas
+    documentos_base = []
+    for i, page_text in enumerate(pure_text_pages):
+        doc = Document(
+            page_content=page_text,
+            metadata={
+                "source": f"Página {i+1}", # Metadata CORRETO para os botões
+                "page": i # Índice 0
+            }
+        )
+        documentos_base.append(doc)
+    
+    if not documentos_base:
+        print("--- AVISO: Nenhum texto recebido do PDF puro. ---")
+        return None, None
+    
+    # 2. Dividir o texto em chunks menores (REUTILIZANDO SUA FUNÇÃO)
+    chunks = dividir_em_chunks(documentos_base)
+
+    if not chunks:
+        print("--- AVISO: Nenhum chunk de texto foi gerado (Texto Puro). ---")
+        return None, None
+
+    # 3. Criar o índice vetorial FAISS (REUTILIZANDO SUA FUNÇÃO)
+    index, chunks_final = criar_faiss(chunks)
+
+    return index, chunks_final
+
+def fluxo_principal_texto_puro(pure_text_pages: list[str], nome_arquivo: str):
+    """
+    (NOVO E CORRIGIDO) Orquestra o fluxo de RAG para PDFs baseados em texto.
+    Reutiliza 'configurar_llm' e 'buscar_resposta'.
+    """
+    print("==============================================")
+    print(f"DEBUG: [fluxo_principal_texto_puro] INICIADO para {len(pure_text_pages)} páginas")
+    
+    try:
+        # 1. Chama a nova função cacheada de processamento de texto
+        print("DEBUG: [Etapa 1] Chamando processar_texto_puro_cacheado...")
+        index, chunks_final = processar_texto_puro_cacheado(
+            pure_text_pages, nome_arquivo # Passa a lista de páginas
+        )
+        print("DEBUG: [Etapa 1] processar_texto_puro_cacheado CONCLUÍDO.")
+
+        if index is None:
+            print("DEBUG: [Etapa 1] FALHA. 'index' é None.")
+            return {
+                "resposta": "Não foi possível processar o texto do documento.",
+                "fontes": [], "documentos_fonte": [], "bboxes": []
+            }
+        
+        print(f"DEBUG: [Etapa 1] SUCESSO. 'index' criado. Total de chunks: {len(chunks_final)}")
+
+        # 2. Preparar a busca (REUTILIZANDO SUA LÓGICA)
+        query = "Extraia as informações do documento solicitadas no template, com base no contexto fornecido."
+        print(f"DEBUG: [Etapa 2] Configurando LLM e chain...")
+        chain = configurar_llm()
+        print("DEBUG: [Etapa 2] CONCLUÍDO.")
+
+        # 3. Executar a busca (REUTILIZANDO SUA FUNÇÃO)
+        print("DEBUG: [Etapa 3] Chamando buscar_resposta (LLM)...")
+        resposta = buscar_resposta(index, chunks_final, query, chain)
+        print("DEBUG: [Etapa 3] buscar_resposta CONCLUÍDO.")
+        
+        # O fluxo de texto puro não gera bboxes de OCR
+        resposta["bboxes"] = [] 
+
+        print("----------------------------------------------")
+        print("DEBUG: [Resultado] RESPOSTA BRUTA DO BACKEND (Texto Puro):")
+        # print(resposta) # Log muito grande
+        print(resposta.get("resposta"))
+        print("----------------------------------------------")
+        
+        if resposta is None:
+            return {
+                "resposta": "Erro: A função de busca (LLM) não retornou nada (None).",
+                "fontes": [], "documentos_fonte": [], "bboxes": []
+            }
+
+        print("DEBUG: [fluxo_principal_texto_puro] RETORNANDO RESPOSTA COM SUCESSO.")
+        print("==============================================")
+        return resposta
+
+    except Exception as e:
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print(f"DEBUG: [fluxo_principal_texto_puro] !!! EXCEÇÃO CAPTURADA !!!")
+        print(f"Erro: {e}")
+        traceback.print_exc()
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        return {
+            "resposta": f"Erro crítico no backend (texto puro): {e}",
+            "fontes": [], "documentos_fonte": [], "bboxes": []
+        }
 
 # ==============================================================================
-#  ORQUESTRADOR PRINCIPAL 
+# FIM: NOVAS FUNÇÕES ADICIONADAS
 # ==============================================================================
