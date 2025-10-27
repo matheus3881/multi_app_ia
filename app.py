@@ -315,7 +315,7 @@ with tab_ocr:
                     st.error(f"Erro ao desenhar bbox {bbox_lista}: {e}")
 
             # 4. Mostra a imagem final
-            st.image(imagem_para_desenhar, use_column_width=True)
+            st.image(imagem_para_desenhar, width="content")
             
         else:
             st.info("Aguardando o envio de um documento...")
