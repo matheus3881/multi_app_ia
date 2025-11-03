@@ -6,6 +6,7 @@ from PIL import Image
 import pymupdf  # Fitz
 from st_clipboard import copy_to_clipboard_unsecured
 from PIL import ImageDraw
+import time
 
 # --- Importações dos seus módulos ---
 from src.ocr_pipeline import fluxo_principal, fluxo_principal_texto_puro
@@ -29,6 +30,7 @@ st.session_state.setdefault('imagens_processadas', None)
 st.session_state.setdefault('is_pure_pdf', False)
 st.session_state.setdefault('pure_text_pages', None) # Agora é uma lista
 st.session_state.setdefault('pdf_realcado_bytes', None)
+st.session_state.setdefault('total_time', None)
 
 # ==============================================================================
 # INÍCIO: FUNÇÕES DE LÓGICA DO "BRAÇO" PDF PURO
@@ -171,6 +173,9 @@ with tab_ocr:
     # --- ETAPA 2: PROCESSAMENTO (AÇÃO DO BOTÃO) ---
     if st.button("Processar Documento"):
         if st.session_state.file_bytes:
+            start_time = time.perf_counter()
+            st.session_state.total_time = None
+            
             with st.spinner("Analisando o documento..."):
                 try:
                     # --- INÍCIO: LÓGICA DE "BRAÇOS" ---
@@ -251,9 +256,17 @@ with tab_ocr:
                     print("--- ERRO NO FLUXO PRINCIPAL ---")
                     traceback.print_exc()
                     print("-------------------------------")
+                finally:
+                    end_time = time.perf_counter()
+                    total_time = end_time - start_time
+                    st.session_state.total_time = total_time
         else:
-            st.warning("Por favor, envie um ficheiro primeiro.")
+            st.warning("Por favor, envie um arquivo primeiro.")
             
+        if st.session_state.get('total_time') is not None:
+            st.info(f"Tempo total de processamento: {st.session_state.total_time:.2f} segundos")
+            st.session_state.total_time = None
+        
     # --- ETAPA 3: EXIBIÇÃO EM DUAS COLUNAS ---
     col1, col2 = st.columns(2, gap='large')
 

@@ -118,7 +118,7 @@ def realizar_ocr(imagens: list):
         img_cv = np.array(img)
 
         # Usa Output.DICT para obter um dicionário
-        data = pytesseract.image_to_data(img_cv, lang='por', output_type=Output.DICT) # lang='por'
+        data = pytesseract.image_to_data(img_cv, output_type=Output.DICT) # lang='por'
 
         n_boxes = len(data['text'])
 
@@ -221,6 +221,10 @@ def configurar_llm():
     llm = ChatOllama(model=model, temperature=0)
     prompt_template = """
         Você é um assistente preciso para extrair informações de documentos.
+        Sua resposta deve ser APENAS texto plano, seguindo o formato de lista.
+        NÃO inclua chaves `{{}}`, colchetes `[]` ou qualquer formatação JSON.
+        
+        
         Com base no CONTEXTO fornecido, extraia os seguintes dados:
         
         - Nome da empresa: ...
