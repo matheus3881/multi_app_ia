@@ -1,4 +1,5 @@
 import traceback
+from turtle import onclick
 import streamlit as st
 import io
 import re
@@ -11,7 +12,7 @@ import time
 # --- Importações dos seus módulos ---
 from src.ocr_pipeline import fluxo_principal, fluxo_principal_texto_puro
 from src.sqlServer_search import buscar_no_banco
-from winsper import whinsper
+from src.transcricao import transcrever_audio
 
 
 st.set_page_config(layout="wide")
@@ -32,6 +33,8 @@ st.session_state.setdefault("is_pure_pdf", False)
 st.session_state.setdefault("pure_text_pages", None)  # Agora é uma lista
 st.session_state.setdefault("pdf_realcado_bytes", None)
 st.session_state.setdefault("total_time", None)
+
+
 
 # ==============================================================================
 # INÍCIO: FUNÇÕES DE LÓGICA DO "BRAÇO" PDF PURO
@@ -473,15 +476,47 @@ with tab_vetorial:
 
 
 with tab_transcricao:
-    st.header("Trnascreva seus arquivos de áudio")
+    st.header("Transcreva seus arquivos de áudio")
+
     audio_file = st.file_uploader(
-        "Escolha um arquivo de áudio", ype=["mp3", "ogg"], key="transcriçao_audio"
+        "Escolha um arquivo de áudio",
+        type=["mp3", "ogg", "wav", "mp4"],
+        key="transcricao_audio",
     )
 
     if audio_file is not None:
-        st.success("Arquivo de áudio carregado com sucesso!")
+        # Verificação de tamanho (apenas visual, não bloqueia no seu código original)
+        if audio_file.size > 26214400:
+            st.warning(
+                f"⚠️ O arquivo é muito grande! ({audio_file.size / (1024*1024):.2f} MB). Isso pode demorar."
+            )
 
-        transcritor = whinsper(audio_file)
+        st.success("Arquivo carregado e pronto.")
+
+        if st.button("Transcrever") :
+            # Feedback visual de carregamento
+            with st.status("Processando áudio...", expanded=True) as status:
+                st.write("Iniciando motor de IA...")
+                time.sleep(1)  # UX fake apenas para o usuário ver a transição
+
+                st.write("Transcrevendo...")
+
+            try:
+                # Chamada da função protegida
+                texto_final = transcrever_audio(audio_file)
+
+                status.update(
+                    label="Transcrição concluída!", state="complete", expanded=False
+                )
+
+                st.divider()
+                st.subheader("Resultado:")
+                st.write(texto_final)
+
+
+            except RuntimeError:
+                status.update(label="Erro no processamento", state="error")
+                st.error("Ocorreu um erro interno. Verifique os logs do sistema.")
 
     else:
-        st.info("Por favor, carregue um arquivo de áudio")
+        st.info("👆 Por favor, carregue um arquivo de áudio para começar.")
