@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 import whisper
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def carregar_modelo():
     model = whisper.load_model("turbo")
     return model

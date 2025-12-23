@@ -35,7 +35,6 @@ st.session_state.setdefault("pdf_realcado_bytes", None)
 st.session_state.setdefault("total_time", None)
 
 
-
 # ==============================================================================
 # INÍCIO: FUNÇÕES DE LÓGICA DO "BRAÇO" PDF PURO
 # ==============================================================================
@@ -474,13 +473,14 @@ with tab_vetorial:
         st.subheader("Resultados da Busca:")
         st.write(st.session_state.vector_results)
 
-
+# ============================================================================
 with tab_transcricao:
+    # inicializar botão
     st.header("Transcreva seus arquivos de áudio")
 
     audio_file = st.file_uploader(
         "Escolha um arquivo de áudio",
-        type=["mp3", "ogg", "wav", "mp4"],
+        type=["mp3", "ogg",],
         key="transcricao_audio",
     )
 
@@ -493,30 +493,24 @@ with tab_transcricao:
 
         st.success("Arquivo carregado e pronto.")
 
-        if st.button("Transcrever") :
-            # Feedback visual de carregamento
-            with st.status("Processando áudio...", expanded=True) as status:
-                st.write("Iniciando motor de IA...")
-                time.sleep(1)  # UX fake apenas para o usuário ver a transição
+        # se audio existe botão deve existir
 
-                st.write("Transcrevendo...")
+        if st.button("Transcrever", key="transcrever"):
+            # se botão for clicado, botão deve ser desativa
 
-            try:
-                # Chamada da função protegida
-                texto_final = transcrever_audio(audio_file)
-
-                status.update(
-                    label="Transcrição concluída!", state="complete", expanded=False
-                )
-
-                st.divider()
-                st.subheader("Resultado:")
-                st.write(texto_final)
+            
+            with st.spinner("Wait for it...", show_time=True):
+                try:
+                    # Chamada da função protegida
+                    texto_final = transcrever_audio(audio_file)
 
 
-            except RuntimeError:
-                status.update(label="Erro no processamento", state="error")
-                st.error("Ocorreu um erro interno. Verifique os logs do sistema.")
+                    st.divider()
+                    st.subheader("Resultado:")
+                    st.write(texto_final)
+
+                except RuntimeError:
+                    st.error("Ocorreu um erro interno. Verifique os logs do sistema.")
 
     else:
         st.info("👆 Por favor, carregue um arquivo de áudio para começar.")

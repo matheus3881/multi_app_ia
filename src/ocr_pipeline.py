@@ -3,7 +3,6 @@
 # --- Importações Essenciais ---
 import traceback
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFacePipeline
 from langchain_ollama import ChatOllama
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
@@ -14,10 +13,8 @@ from transformers import pipeline
 import io
 import os
 import re
-import easyocr
 import faiss
 import numpy as np
-import pandas as pd
 import streamlit as st
 import pymupdf  # Fitz
 import torch
@@ -28,7 +25,7 @@ from PIL import Image
 import pytesseract
 from pytesseract import Output
 # Configure o caminho para o executável do Tesseract, se necessário
-pytesseract.pytesseract.tesseract_cmd = r"C:\Users\msantos\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+# pytesseract.pytesseract.tesseract_cmd = r"C:\Users\msantos\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
 
 # --- hugginf face ---
 # --- Machine Learning & LangChain ---
