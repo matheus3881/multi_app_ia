@@ -38,28 +38,28 @@ def carregar_modelo():
     return model
 
 
-def transcrever_audio(audio_file):
+def transcrever_audio(audio_file: str):
     inicio = time.perf_counter()
     file_name = audio_file.name
-    file_size_mb = audio_file.size / (1024 * 1024)
+    # file_size_mb = audio_file.size / (1024 * 1024)
 
-    logger.info(
-        f"Iniciando transcrição: Arquivo='{file_name}' | Tamanho={file_size_mb:.2f}MB"
-    )
+    # logger.info(
+    #     f"Iniciando transcrição: Arquivo='{file_name}' | Tamanho={file_size_mb:.2f}MB"
+    # )
 
-    suffix = os.path.splitext(audio_file.name)[1]
-    fd, temp_path = tempfile.mkstemp(suffix=suffix)
+    # suffix = os.path.splitext(audio_file.name)[1]
+    # fd, temp_path = tempfile.mkstemp(suffix=suffix)
 
     try:
-        with os.fdopen(fd, "wb") as tmp:
-            tmp.write(audio_file.read())
+        # with os.fdopen(fd, "wb") as tmp:
+        #     tmp.write(audio_file.read())
 
-            audio_file.seek(0)
+        #     audio_file.seek(0)
 
 
         # Whisper recebe o PATH, não fd
         model_whinsper = carregar_modelo()
-        result = model_whinsper.transcribe(temp_path)
+        result = model_whinsper.transcribe(audio_file)
 
         fim = time.perf_counter()
 
@@ -76,7 +76,7 @@ def transcrever_audio(audio_file):
         )
         raise RuntimeError(f"Erro ao processar o áudio: {e}") from e
 
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-            logger.debug(f"Arquivo temporário removido: {temp_path}")
+    # finally:
+    #     if os.path.exists(temp_path):
+    #         os.remove(temp_path)
+    #         logger.debug(f"Arquivo temporário removido: {temp_path}")
